@@ -1,0 +1,11 @@
+__pycache__/
+_internal_resources/
+cli/
+eeg/
+examples/
+external/
+GUI/
+resources/
+segmentation/
+charm
+charm_tms
