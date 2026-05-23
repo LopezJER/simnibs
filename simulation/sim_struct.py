@@ -1501,7 +1501,7 @@ class POSITION(object):
         mask_simnibs_ids = np.unique(tris_in_mask)        # still 1-indexed
         mask_coords      = msh.nodes.node_coord[mask_simnibs_ids - 1]
 
-        return mask_simnibs_ids, mask_coords        
+        return mask_simnibs_ids, mask_coords, rim_boundary_pts       
     def _get_projected_path_internal(self, tree, pts, p1, p2, num_samples=50):
         """Helper to create a dense line snapped to the scalp."""
         t = np.linspace(0, 1, num_samples)[:, None]
@@ -1524,7 +1524,42 @@ class POSITION(object):
         except Exception as e: 
             print(f"Error reading CSV: {e}")
             return [], []
+            
+    def _compute_translation_ranges_from_rim(self, rim_boundary_pts):
+            """
+            Compute global translation ranges by projecting rim boundary into coil local XY.
+            Clamps the allowed translation to a default maximum of [-20, 20].
+            """
+            scalp_pt = self.matsimnibs[:3, 3] - self.distance * self.matsimnibs[:3, 2]
+            coil_x = self.matsimnibs[:3, 0]
+            coil_y = self.matsimnibs[:3, 1]
 
+            rim_centered = rim_boundary_pts - scalp_pt  # (N, 3)
+            proj_x = rim_centered @ coil_x  # (N,)
+            proj_y = rim_centered @ coil_y  # (N,)
+
+            # Clamp the projected mask boundaries to the [-20, 20] maximum
+            hybrid_x_min = max(-20.0, float(proj_x.min()))
+            hybrid_x_max = min( 20.0, float(proj_x.max()))
+            hybrid_y_min = max(-20.0, float(proj_y.min()))
+            hybrid_y_max = min( 20.0, float(proj_y.max()))
+
+            # Fallback: If the initial position is already outside the mask 
+            # (making min > max), lock the translation to 0 in that axis.
+            if hybrid_x_min > hybrid_x_max: 
+                hybrid_x_min = hybrid_x_max = 0.0
+            if hybrid_y_min > hybrid_y_max: 
+                hybrid_y_min = hybrid_y_max = 0.0
+
+            # Safely fetch Z-range if it exists on the object, otherwise default to [-30.0, 30.0]
+            z_range = getattr(self, 'global_translation_ranges', None)
+            z_limits = z_range[2] if z_range else [-30.0, 30.0]
+
+            return [
+                [hybrid_x_min, hybrid_x_max],
+                [hybrid_y_min, hybrid_y_max],
+                z_limits
+            ]
 
     def calc_matsimnibs_modified(self, msh, cap=None, msh_surf=None, node_list=None, mask_retreat_mm = 0.0, orientation_mode = 'surface_normal'):
         if type(msh) == str:
