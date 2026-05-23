@@ -366,7 +366,7 @@ class TmsFlexOptimization:
             self.matsimnibs, rim_boundary_pts = self.pos.calc_matsimnibs_modified(
                 self._mesh, cap=cutini_cap, mask_retreat_mm=0.0, orientation_mode='surface_normal'
             )
-            self.global_translation_ranges = self.pos._compute_translation_ranges_from_rim(rim_boundary_pts)
+            self.global_translation_ranges = self.pos._compute_translation_ranges_from_rim(rim_boundary_pts, self.matsimnibs, self.distance, self.global_translation_ranges)
         else:
             self.pos.calc_matsimnibs(self._mesh)
 

@@ -1525,24 +1525,27 @@ class POSITION(object):
             print(f"Error reading CSV: {e}")
             return [], []
             
-    def _compute_translation_ranges_from_rim(self, rim_boundary_pts):
+    def _compute_translation_ranges_from_rim(self, rim_boundary_pts, matsimnibs, distance, global_translation_ranges):
             """
             Compute global translation ranges by projecting rim boundary into coil local XY.
             Clamps the allowed translation to a default maximum of [-20, 20].
             """
-            scalp_pt = self.matsimnibs[:3, 3] - self.distance * self.matsimnibs[:3, 2]
-            coil_x = self.matsimnibs[:3, 0]
-            coil_y = self.matsimnibs[:3, 1]
+
+            if rim_boundary_pts is None:
+                return global_translation_ranges
+            scalp_pt = matsimnibs[:3, 3] - distance * matsimnibs[:3, 2]
+            coil_x = matsimnibs[:3, 0]
+            coil_y = matsimnibs[:3, 1]
 
             rim_centered = rim_boundary_pts - scalp_pt  # (N, 3)
             proj_x = rim_centered @ coil_x  # (N,)
             proj_y = rim_centered @ coil_y  # (N,)
 
             # Clamp the projected mask boundaries to the [-20, 20] maximum
-            hybrid_x_min = max(-20.0, float(proj_x.min()))
-            hybrid_x_max = min( 20.0, float(proj_x.max()))
-            hybrid_y_min = max(-20.0, float(proj_y.min()))
-            hybrid_y_max = min( 20.0, float(proj_y.max()))
+            hybrid_x_min = max(global_translation_ranges[0][0], float(proj_x.min()))
+            hybrid_x_max = min(global_translation_ranges[0][1], float(proj_x.max()))
+            hybrid_y_min = max(global_translation_ranges[1][0], float(proj_y.min()))
+            hybrid_y_max = min(global_translation_ranges[1][1], float(proj_y.max()))
 
             # Fallback: If the initial position is already outside the mask 
             # (making min > max), lock the translation to 0 in that axis.
@@ -1551,9 +1554,7 @@ class POSITION(object):
             if hybrid_y_min > hybrid_y_max: 
                 hybrid_y_min = hybrid_y_max = 0.0
 
-            # Safely fetch Z-range if it exists on the object, otherwise default to [-30.0, 30.0]
-            z_range = getattr(self, 'global_translation_ranges', None)
-            z_limits = z_range[2] if z_range else [-30.0, 30.0]
+            z_limits = global_translation_ranges[2] 
 
             return [
                 [hybrid_x_min, hybrid_x_max],
@@ -1569,6 +1570,7 @@ class POSITION(object):
             
         if self.matsimnibs_is_defined():
             self.matsimnibs = np.array(self.matsimnibs)
+            rim_boundary_pts = None
         else:
             logger.info('Calculating Coil position from (centre, pos_y, distance)')
             
@@ -1591,7 +1593,7 @@ class POSITION(object):
             # 2. Get the SimNIBS Node IDs within the mask boundary
             # We use a standard PLANE_Y cutoff (e.g., -22.0)
             plane_y_cutoff = -22.0 
-            node_list, _ = self.get_scalp_mask_nodes(msh, cap_dict, plane_y_cutoff, retreat_mm=mask_retreat_mm)
+            node_list, _, rim_boundary_pts = self.get_scalp_mask_nodes(msh, cap_dict, plane_y_cutoff, retreat_mm=mask_retreat_mm)
             
             logger.info(f'Identified {len(node_list)} scalp nodes within the mask.')
 
@@ -1603,7 +1605,7 @@ class POSITION(object):
             )
 
         logger.info('matsimnibs: \n{0}'.format(self.matsimnibs))
-        return self.matsimnibs
+        return self.matsimnibs, rim_boundary_pts
 
     def __eq__(self, other):
         if self.name != other.name or self.date != other.date or \
