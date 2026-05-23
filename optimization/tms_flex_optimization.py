@@ -480,7 +480,7 @@ class TmsFlexOptimization:
                 self.l_bfgs_b_args,
             )
         elif self.method == "emag":
-            initial_cost, optimized_cost, opt_matsimnibs, optimized_e_mag, direct, penalties = (
+            initial_cost, optimized_cost, opt_matsimnibs, initial_e_mag, optimized_e_mag, direct, penalties = (
                 optimize_e_mag(
                     self._coil,
                     self._mesh,
@@ -594,7 +594,11 @@ class TmsFlexOptimization:
                 )
             roi_result_vis.write_gmsh_options()
 
-        e_field_log = f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}{os.linesep}" if self.method == "emag" else f""
+        e_field_log = (
+            f"Initial mean E-field magnitude in ROI: {np.mean(initial_e_mag)}{os.linesep}"
+            f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}{os.linesep}"
+        ) if self.method == "emag" else ""
+
         logger.log(26,
             (f"{os.linesep}===============RESULT SUMMARY==============={os.linesep}"
             f"Optimized coil path: {fn_optimized_coil}{os.linesep}"
@@ -1343,7 +1347,7 @@ def optimize_e_mag(
     solver_options = "pardiso",
     cpus = 1,
     debug: bool = False,
-) -> tuple[float, float, npt.NDArray[np.float_], npt.NDArray[np.float_], list, dict]:
+) -> tuple[float, float, npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_], list, dict]:
     """Optimizes the deformations of the coil elements as well as the global transformation to maximize the mean e-field magnitude in the ROI while preventing intersections of the
     scalp surface and the coil casing
 
@@ -1382,6 +1386,8 @@ def optimize_e_mag(
         The cost after the optimization
     result_affine : npt.NDArray[np.float_]
         The optimized affine matrix
+    initial_e_mag : npt.NDArray[np.float_]
+        The e field magnitude in the roi elements at the initial position
     optimized_e_mag : npt.NDArray[np.float_]
         The e field magnitude in the roi elements after the optimization
     opt_results : list
@@ -1479,6 +1485,7 @@ def optimize_e_mag(
 
     best_f = np.inf
     best_x = None
+    initial_e_mag = None
 
     def cost_f_x0_w(x):
         if debug:
@@ -1509,6 +1516,10 @@ def optimize_e_mag(
             return penalty
 
         roi_e_field = fem.update_field(matsimnibs=affine)
+
+        nonlocal initial_e_mag
+        if initial_e_mag is None:
+            initial_e_mag = np.ravel(roi_e_field)
 
         f = penalty - 100 * np.mean(roi_e_field)
 
@@ -1589,11 +1600,13 @@ def optimize_e_mag(
         coil_sampled.get_deformation_ranges(), coil.get_deformation_ranges()
     ):
         coil_deformation.current = sampled_coil_deformation.current
+
     if debug:
         return (
             initial_cost,
             optimized_cost,
             result_affine,
+            initial_e_mag,
             optimized_e_mag,
             opt_results,
             penalties,
@@ -1601,4 +1614,4 @@ def optimize_e_mag(
             fs,
         )
     else:
-        return initial_cost, optimized_cost, result_affine, optimized_e_mag, opt_results, penalties
+        return initial_cost, optimized_cost, result_affine, initial_e_mag, optimized_e_mag, opt_results, penalties
