@@ -44,6 +44,7 @@ import scipy.sparse.csgraph
 import scipy.interpolate
 import nibabel
 import h5py
+SIMNIBS_PATCH_VERSION = "ik_patch_2026_05_13_v1"
 
 from simnibs.utils import file_finder
 from simnibs.utils.mesh_element_properties import ElementTags

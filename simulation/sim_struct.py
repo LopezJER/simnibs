@@ -50,6 +50,7 @@ from ..utils.transformations import project_points_on_surface
 from . import fem
 from . import electrode_placement
 from .. import  __version__
+SIMNIBS_PATCH_VERSION = "ik_patch_2026_05_13_v1"
 
 class SESSION(object):
     """Class that defines a set of simnibs simulations
