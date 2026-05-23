@@ -360,7 +360,10 @@ class TmsFlexOptimization:
         
         if (with_scalp_mask):
             cutini_cap = os.path.join(self.subpath, "eeg_positions", "EEG10-10_Cutini_2011.csv")
-            self.pos.calc_matsimnibs_modified(self._mesh, cap = cutini_cap, mask_retreat_mm = 22.0, orientation_mode = 'surface_normal')
+            self.pos.calc_matsimnibs_modified(self._mesh, cap = cutini_cap, mask_retreat_mm = 0.0, orientation_mode = 'surface_normal')
+            rim_pts = self.pos._rim_boundary_pts  # stored during calc_matsimnibs_modified
+            self.global_translation_ranges = self.pos._compute_translation_ranges_from_rim(rim_pts)
+
         else:
             self.pos.calc_matsimnibs(self._mesh)
 
@@ -1329,6 +1332,24 @@ def add_global_deformations(
             coil_element.deformations.append(global_deformation)
     return global_deformations
 
+def _compute_translation_ranges_from_rim(self, rim_boundary_pts):
+    """
+    Compute global translation ranges by projecting rim boundary into coil local XY.
+    Called after matsimnibs is set.
+    """
+    scalp_pt = self.matsimnibs[:3, 3] - self.distance * self.matsimnibs[:3, 2]
+    coil_x = self.matsimnibs[:3, 0]
+    coil_y = self.matsimnibs[:3, 1]
+
+    rim_centered = rim_boundary_pts - scalp_pt  # (N, 3)
+    proj_x = rim_centered @ coil_x  # (N,)
+    proj_y = rim_centered @ coil_y  # (N,)
+
+    return [
+        [float(proj_x.min()), float(proj_x.max())],
+        [float(proj_y.min()), float(proj_y.max())],
+        self.global_translation_ranges[2] if self.global_translation_ranges else [-30, 30],
+    ]
 
 def optimize_e_mag(
     coil: TmsCoil,
