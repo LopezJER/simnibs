@@ -576,7 +576,7 @@ class TmsFlexOptimization:
                 base_head_mesh
             )
             roi_result_vis.create_visualization()
-            vis_msh_file_names = roi_result_vis.write_visualization()
+            vis_msh_file_names = roi_result_vis.write_visualization()  # only once
 
             if roi_result_vis.has_head_mesh():
                 self._coil.append_simulation_visualization(
@@ -599,6 +599,13 @@ class TmsFlexOptimization:
                     infix="-initial",
                     axis_vectors=True
                 )
+
+
+            # Delete redundant head mesh copy after everything that needs it has run
+            for f in list(vis_msh_file_names):  # list() so we're not iterating the original
+                if f.endswith("_head_mesh.msh"):
+                    os.remove(f)
+                    vis_msh_file_names.remove(f)
             roi_result_vis.write_gmsh_options()
 
         e_field_log = f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}{os.linesep}" if self.method == "emag" else f""
