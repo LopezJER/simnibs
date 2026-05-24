@@ -457,14 +457,15 @@ class TmsFlexOptimization:
             from numba import get_num_threads
             logger.info(f"Numba reports {get_num_threads()} threads available")
 
+        original_translation_ranges = self.global_translation_ranges
         self._prepare(with_scalp_mask=with_scalp_mask)
-         
+
         if self.pos is None:
             raise AttributeError("pos is None")
-        
+
         if self.fnamecoil is None:
             raise AttributeError("fnamecoil is None")
-        
+
         if self._mesh is None:
             raise AttributeError("mesh is not loaded")
 
@@ -490,7 +491,7 @@ class TmsFlexOptimization:
                 self.l_bfgs_b_args,
             )
         elif self.method == "emag":
-            initial_cost, optimized_cost, opt_matsimnibs, optimized_e_mag, direct, penalties = (
+            initial_cost, optimized_cost, opt_matsimnibs, initial_e_mag, optimized_e_mag, direct, penalties = (
                 optimize_e_mag(
                     self._coil,
                     self._mesh,
@@ -519,9 +520,8 @@ class TmsFlexOptimization:
             f"Optimized penalties: {penalties}"
         )
         if self.method == "emag":
-            logger.info(
-                f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}"
-            )
+            logger.info(f"Initial mean E-field magnitude in ROI: {np.mean(initial_e_mag) if initial_e_mag is not None else 'N/A (penalty above cutoff)'}")
+            logger.info(f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}")
 
         logger.info(f"Matsimnibs result:{os.linesep}{opt_matsimnibs}")
 
@@ -579,7 +579,7 @@ class TmsFlexOptimization:
                 base_head_mesh
             )
             roi_result_vis.create_visualization()
-            vis_msh_file_names = roi_result_vis.write_visualization()  # only once
+            vis_msh_file_names = roi_result_vis.write_visualization()
 
             if roi_result_vis.has_head_mesh():
                 self._coil.append_simulation_visualization(
@@ -603,17 +603,31 @@ class TmsFlexOptimization:
                     axis_vectors=True
                 )
 
-
             # Delete redundant head mesh copy after everything that needs it has run
-            for f in list(vis_msh_file_names):  # list() so we're not iterating the original
+            for f in list(vis_msh_file_names):
                 if f.endswith("_head_mesh.msh"):
                     os.remove(f)
                     vis_msh_file_names.remove(f)
             roi_result_vis.write_gmsh_options()
 
-        e_field_log = f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}{os.linesep}" if self.method == "emag" else f""
+        e_field_log = (
+            f"Initial mean E-field magnitude in ROI: {np.mean(initial_e_mag) if initial_e_mag is not None else 'N/A (penalty above cutoff)'}{os.linesep}"
+            f"Optimized mean E-field magnitude in ROI: {np.mean(optimized_e_mag)}{os.linesep}"
+        ) if self.method == "emag" else ""
+
+        scalp_mask_log = f"With scalp mask: {with_scalp_mask}{os.linesep}"
+
+        translation_ranges_log = (
+            f"Global translation ranges (before scalp mask): {original_translation_ranges}{os.linesep}"
+            f"Global translation ranges (after scalp mask):  {self._global_translation_ranges.tolist()}{os.linesep}"
+        ) if with_scalp_mask else (
+            f"Global translation ranges: {self._global_translation_ranges.tolist()}{os.linesep}"
+        )
+
         logger.log(26,
             (f"{os.linesep}===============RESULT SUMMARY==============={os.linesep}"
+            f"{scalp_mask_log}"
+            f"{translation_ranges_log}"
             f"Optimized coil path: {fn_optimized_coil}{os.linesep}"
             f"Initial cost: {initial_cost}{os.linesep}"
             f"Optimized cost: {optimized_cost}{os.linesep}"
@@ -629,8 +643,8 @@ class TmsFlexOptimization:
         self._finish_logger()
 
         if self.run_simulation and self.open_in_gmsh:
-                for vis_msh_file_name in vis_msh_file_names:
-                    mesh_io.open_in_gmsh(vis_msh_file_name, True)
+            for vis_msh_file_name in vis_msh_file_names:
+                mesh_io.open_in_gmsh(vis_msh_file_name, True)
 
     def to_dict(self) -> dict:
         """Makes a dictionary storing all settings as key value pairs
@@ -1359,7 +1373,8 @@ def optimize_e_mag(
     solver_options = "pardiso",
     cpus = 1,
     debug: bool = False,
-) -> tuple[float, float, npt.NDArray[np.float_], npt.NDArray[np.float_], list, dict]:
+) -> tuple[float, float, npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_], list, dict]:
+
     """Optimizes the deformations of the coil elements as well as the global transformation to maximize the mean e-field magnitude in the ROI while preventing intersections of the
     scalp surface and the coil casing
 
@@ -1489,6 +1504,9 @@ def optimize_e_mag(
     initial_deformation_settings = np.array(
         [coil_deformation.current for coil_deformation in coil_deformation_ranges]
     )
+
+    initial_e_mag = None
+
     if debug:
         tracking_deformations = []
         fs = []
@@ -1497,6 +1515,8 @@ def optimize_e_mag(
     best_x = None
 
     def cost_f_x0_w(x):
+        nonlocal initial_e_mag
+
         if debug:
             deformations = []
 
@@ -1525,6 +1545,10 @@ def optimize_e_mag(
             return penalty
 
         roi_e_field = fem.update_field(matsimnibs=affine)
+
+        # Cache the first FEM result as initial e-mag
+        if initial_e_mag is None:
+            initial_e_mag = np.ravel(roi_e_field.copy())
 
         f = penalty - 100 * np.mean(roi_e_field)
 
@@ -1605,11 +1629,13 @@ def optimize_e_mag(
         coil_sampled.get_deformation_ranges(), coil.get_deformation_ranges()
     ):
         coil_deformation.current = sampled_coil_deformation.current
+
     if debug:
         return (
             initial_cost,
             optimized_cost,
             result_affine,
+            initial_e_mag,
             optimized_e_mag,
             opt_results,
             penalties,
@@ -1617,4 +1643,4 @@ def optimize_e_mag(
             fs,
         )
     else:
-        return initial_cost, optimized_cost, result_affine, optimized_e_mag, opt_results, penalties
+        return initial_cost, optimized_cost, result_affine, initial_e_mag, optimized_e_mag, opt_results, penalties
